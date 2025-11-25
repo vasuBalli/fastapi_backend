@@ -6,7 +6,8 @@ python-multipart==0.0.9
 aiofiles==23.2.1
 pydantic==2.6.1
 pydantic-core==2.16.2
-starlette==0.37.2
+starlette==0.36.3
+
 
 # Optional: caching & redis (uncomment if needed)
 fastapi-cache2==0.2.1
