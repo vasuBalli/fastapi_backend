@@ -101,6 +101,6 @@ def download(url: str = Query(...), index: int = Query(0)):
 
 
 @app.get("/api/test")
-@cache(expire=3600)
+# @cache(expire=3600)
 def test_cache():
     return {"ok": True, "message": "Cache is working!"}
