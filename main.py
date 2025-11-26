@@ -98,3 +98,9 @@ def download(url: str = Query(...), index: int = Query(0)):
     except Exception as e:
         print("download error:", e)
         return {"ok": False, "message": "Download failed"}
+
+
+@app.get("/api/test")
+@cache(expire=3600)
+def test_cache():
+    return {"ok": True, "message": "Cache is working!"}
