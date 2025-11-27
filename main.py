@@ -2,14 +2,15 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional, List
 from urllib.parse import quote
 import yt_dlp
 import requests
+import os
 
 app = FastAPI()
 
-# Allow frontend access
+# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,10 +18,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ----------------------------------------
-# MODELS
-# ----------------------------------------
+# ----------------------------
+# Models
+# ----------------------------
 
 class InfoRequest(BaseModel):
     url: str
@@ -38,12 +38,11 @@ class InfoResponse(BaseModel):
     input_url: str
 
 
-# ----------------------------------------
-# UTIL
-# ----------------------------------------
+# ----------------------------
+# Utils
+# ----------------------------
 
 def _format_duration(seconds: Optional[int]) -> str:
-    """Convert seconds to M:SS format."""
     if seconds is None:
         return ""
     seconds = int(seconds)
@@ -51,28 +50,39 @@ def _format_duration(seconds: Optional[int]) -> str:
     return f"{m}:{s:02d}"
 
 
-# ----------------------------------------
-# API: GET VIDEO INFO (yt-dlp)
-# ----------------------------------------
+# ----------------------------
+# Shared yt-dlp options
+# ----------------------------
+
+def get_ydl_opts():
+    cookie_path = os.path.join(os.getcwd(), "cookies.txt")
+
+    return {
+        "quiet": True,
+        "nocheckcertificate": True,
+        "extract_flat": False,
+        "cookiefile": cookie_path,   # THE FIX!!!
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
+            ),
+            "Referer": "https://www.instagram.com/"
+        }
+    }
+
+
+# ----------------------------
+# API: /api/info
+# ----------------------------
 
 @app.post("/api/info", response_model=InfoResponse)
 def get_info(payload: InfoRequest):
     url = payload.url.strip()
 
     try:
-        ydl_opts = {
-            "quiet": True,
-            "nocheckcertificate": True,
-            "extract_flat": False,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0 Safari/537.36"
-                ),
-                "Referer": "https://www.instagram.com/"
-            }
-        }
+        ydl_opts = get_ydl_opts()
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -80,14 +90,14 @@ def get_info(payload: InfoRequest):
         items: List[VideoItem] = []
 
         def build(entry, idx):
+            title = entry.get("title") or f"Clip {idx+1}"
             return VideoItem(
                 index=idx,
-                title=entry.get("title") or f"Clip {idx+1}",
+                title=title,
                 duration=_format_duration(entry.get("duration")),
                 download_url=f"/api/download?url={quote(url, safe='')}&index={idx}"
             )
 
-        # Support carousel posts
         if "entries" in info and info["entries"]:
             for i, e in enumerate(info["entries"]):
                 items.append(build(e, i))
@@ -105,25 +115,14 @@ def get_info(payload: InfoRequest):
         )
 
 
-# ----------------------------------------
-# API: DOWNLOAD VIDEO (Streaming)
-# ----------------------------------------
+# ----------------------------
+# API: /api/download
+# ----------------------------
 
 @app.get("/api/download")
 def download(url: str = Query(...), index: int = Query(0)):
     try:
-        ydl_opts = {
-            "quiet": True,
-            "nocheckcertificate": True,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0 Safari/537.36"
-                ),
-                "Referer": "https://www.instagram.com/"
-            }
-        }
+        ydl_opts = get_ydl_opts()
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -133,11 +132,10 @@ def download(url: str = Query(...), index: int = Query(0)):
 
         filename = (entry.get("title") or "instagram_video").replace(" ", "_") + ".mp4"
 
-        # Stream video from Instagram CDN
         cdn_stream = requests.get(
             direct_url,
             stream=True,
-            timeout=20,
+            timeout=25,
             headers={
                 "User-Agent": "Mozilla/5.0",
                 "Referer": "https://www.instagram.com/"
@@ -164,9 +162,9 @@ def download(url: str = Query(...), index: int = Query(0)):
         )
 
 
-# ----------------------------------------
-# HEALTH CHECK
-# ----------------------------------------
+# ----------------------------
+# Health Check
+# ----------------------------
 
 @app.get("/api/health")
 def health():
